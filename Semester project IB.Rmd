@@ -1,0 +1,298 @@
+---
+title: "Untitled"
+author: "Alexandra Tsitrina"
+date: "12/3/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning=FALSE, message=FALSE, tidy = TRUE )
+knitr::opts_knit$set(root.dir = '/Volumes/STORAGE/Bioinf/Project Statistics/Project_VWF/Results2')
+```
+
+## Статистическая оценка распределения флуоресцентного сигнала фактора Виллебранда по поверхности клеток HUVEC 
+
+Значения переменных:
+Sample: exprimental group name
+Well: coordinates of sample in 48-well plate
+Children:  number of children object of one parental object
+Area: The number of pixels in the region.
+Eccentricity: The eccentricity of the ellipse that has the same second-moments as the region. The eccentricity is the ratio of the distance between the foci of the ellipse and its major axis length. The value is between 0 and 1. (0 and 1 are degenerate cases; an ellipse whose eccentricity is 0 is actually a circle, while an ellipse whose eccentricity is 1 is a line segment.)
+FormFactor: Calculated as 4*π*Area/Perimeter2. Equals 1 for a perfectly circular object.
+MinFeretDiameter, MaxFeretDiameter: The Feret diameter is the distance between two parallel lines tangent on either side of the object (imagine taking a caliper and measuring the object at various angles). The minimum and maximum Feret diameters are the smallest and largest possible diameters, rotating the calipers along all possible angles.
+IntegratedIntensity (II): The sum of the pixel intensities within an object.
+MeanIntensity (Mean_I): The average pixel intensity within an object.
+StdIntensity (Std_I): The standard deviation of the pixel intensities within an object.
+MaxIntensity (Max_I): The maximal pixel intensity within an object.
+MinIntensity (Min_I): The minimal pixel intensity within an object.
+IntegratedIntensityEdge (Edge_II): The sum of the edge pixel intensities of an object.
+MeanIntensityEdge (Mean_I_Edge): The average edge pixel intensity of an object.
+StdIntensityEdge (Std_I_Edge): The standard deviation of the edge pixel intensities of an object.
+MaxIntensityEdge (Max_I_Edge): The maximal edge pixel intensity of an object.
+MinIntensityEdge (Min_I_Edge): The minimal edge pixel intensity of an object.
+MassDisplacement (MassDisp): The distance between the centers of gravity in the gray-level representation of the object and the binary representation of the object.
+LowerQuartileIntensity (LQ_I): The intensity value of the pixel for which 25% of the pixels in the object have lower values.
+MedianIntensity (Median_I): The median intensity value within the object.
+MADIntensity (Mad_I): The median absolute deviation (MAD) value of the intensities within the object. The MAD is defined as the median(|xi - median(x)|).
+UpperQuartileIntensity (UQ_I): The intensity value of the pixel for which 75% of the pixels in the object have lower values.
+
+```{r}
+options(encoding = "UTF-8")
+
+PkgNames <- c("dplyr", "magrittr", "ggplot2", "reshape2", "purrr","utf8", "data.table", "plyr", "rcompanion", "corrplot", "car", "multcomp", "DescTools", "vegan", "randomForest", "caTools")
+invisible(suppressMessages(suppressWarnings(lapply(PkgNames, require, character.only = T))))
+```
+
+## Генерация данных
+Подгрузим 3 исходных датасета и уберем лишние переменные:
+1. Датасет Cells - содержит описание отдельных клеток в нашем анализе. Включает в себя численные параметры интенсивности каждой клетки, количество дочерних объектов, представленных в 2-х других датасетах (Children) а также 2 факторные переменные, описывающие  экспериментальную группу (control, H2O2, Histamin, Trombin) и лунку планшета (технический повтор). 
+2. Датасет Strings - описывает поверхностные структуры фактора Виллебранда, чьи линейные размеры больше /// Помимо 2-х факторных переменных (см. выше) содержит переменные формы и интенсивности каждого объекта
+3. Датасет All_str - содержит в себе описание всех фВ-позитивных структур на поверхности эндотелия. 
+
+Что делается в этом чанке:
+-убираются повторяющиеся и лишние переменные
+-стандартизуются названия групп
+-сокращаются имена переменных для более удобной работы
+
+
+```{r, echo=FALSE}
+abs_way <- getwd()
+abs_way <- normalizePath(abs_way)
+data_files<- dir(abs_way, pattern =".csv")
+
+Cells <- read.table(data_files[2], header = T, sep=",", stringsAsFactors=TRUE )
+All_str <- read.table(data_files[1], header = T, sep=",", stringsAsFactors=TRUE )
+Strings <- read.table(data_files[3], header = T, sep=",", stringsAsFactors=TRUE )
+
+Cells <- subset(Cells, select = -c(1:4,6,7:9))
+Strings<- subset(Strings, select = c(5,10,40,42,48,65,73,111:125))
+All_str <- subset(All_str, select =c(5,10,31,35,50,54,87:101))
+
+Cells$Metadata_Sample <-  revalue(Cells$Metadata_Sample, c('control' = 'control', 'H2O2_Ti' = 'H2O2','Thr_Til' = 'Trombin', 'Hist_Ti' = 'Histamin'))
+Strings$Metadata_Sample <-  revalue(Strings$Metadata_Sample, c("control"="control", "H2O2_Ti"="H2O2","Thr_Til" = "Trombin", "Hist_Ti" = "Histamin"))
+All_str$Metadata_Sample <- revalue(All_str$Metadata_Sample, c("control"="control", "H2O2_Ti"="H2O2","Thr_Til" = "Trombin", "Hist_Ti" = "Histamin"))
+
+setnames(Strings, old = c("Metadata_Sample","AreaShape_Area","AreaShape_Eccentricity","AreaShape_EquivalentDiameter","AreaShape_FormFactor","AreaShape_MaxFeretDiameter","AreaShape_MinFeretDiameter","Intensity_IntegratedIntensityEdge_vWF","Intensity_IntegratedIntensity_vWF","Intensity_LowerQuartileIntensity_vWF","Intensity_MADIntensity_vWF","Intensity_MassDisplacement_vWF","Intensity_MaxIntensityEdge_vWF","Intensity_MaxIntensity_vWF","Intensity_MeanIntensityEdge_vWF","Intensity_MeanIntensity_vWF","Intensity_MedianIntensity_vWF","Intensity_MinIntensityEdge_vWF","Intensity_MinIntensity_vWF","Intensity_StdIntensityEdge_vWF","Intensity_StdIntensity_vWF","Intensity_UpperQuartileIntensity_vWF"), new = c("Sample","Area","Eccentricity",  "EquivalentDiameter","FormFactor","MaxFeretDiameter","MinFeretDiameter","II_Edge","II","LQ_I","MAD_I","MassDisp","Max_I_Edge","Max_I","Mean_I_Edge","Mean_I","Median_I","Min_I_Edge","Min_I","Std_I_Edge","Std_I","UQ_I"))
+
+setnames(All_str, old = c("Metadata_Sample","AreaShape_Area","AreaShape_Eccentricity","AreaShape_FormFactor","AreaShape_MaxFeretDiameter","AreaShape_MinFeretDiameter","Intensity_IntegratedIntensityEdge_vWF","Intensity_IntegratedIntensity_vWF","Intensity_LowerQuartileIntensity_vWF","Intensity_MADIntensity_vWF","Intensity_MassDisplacement_vWF","Intensity_MaxIntensityEdge_vWF","Intensity_MaxIntensity_vWF","Intensity_MeanIntensityEdge_vWF","Intensity_MeanIntensity_vWF","Intensity_MedianIntensity_vWF","Intensity_MinIntensityEdge_vWF","Intensity_MinIntensity_vWF","Intensity_StdIntensityEdge_vWF","Intensity_StdIntensity_vWF","Intensity_UpperQuartileIntensity_vWF"), new = c("Sample","Area","Eccentricity","FormFactor","MaxFeretDiameter","MinFeretDiameter","II_Edge","II","LQ_I","MAD_I","MassDisp","Max_I_Edge","Max_I","Mean_I_Edge","Mean_I","Median_I","Min_I_Edge","Min_I","Std_I_Edge","Std_I","UQ_I"))
+
+setnames(Cells, old = c("Metadata_Sample", "Children_All_vWF_Count","Intensity_IntegratedIntensityEdge_vWF", "Intensity_IntegratedIntensity_vWF","Intensity_LowerQuartileIntensity_vWF","Intensity_MADIntensity_vWF","Intensity_MassDisplacement_vWF","Intensity_MaxIntensityEdge_vWF","Intensity_MaxIntensity_vWF","Intensity_MeanIntensityEdge_vWF","Intensity_MeanIntensity_vWF","Intensity_MedianIntensity_vWF","Intensity_MinIntensityEdge_vWF","Intensity_MinIntensity_vWF","Intensity_StdIntensityEdge_vWF", "Intensity_StdIntensity_vWF","Intensity_UpperQuartileIntensity_vWF"), new = c("Sample", "Children","II_Edge", "II","LQ_I","MAD_I","MassDisp","Max_I_Edge","Max_I","Mean_I_Edge","Mean_I","Median_I","Min_I_Edge","Min_I","Std_I_Edge", "Std_I","UQ_I"))
+
+  
+```
+
+Оценим распределение основных показателей интенсивности и количества дочерних объектов. Как видно из графика, все наши группы содержат значительное количество выбросов. Удалим выбросы, заменив их на пропущенные значения и удалим строки, содержащие NA. Выведем количество оставшихся объектов для каждой группы. 
+
+```{r}
+Cells_cl <- Cells %>% group_by(Sample)%>% filter(Children > 4) 
+
+Cells_int = reshape2::melt(Cells_cl, id.vars = "Sample", measure.vars = c("Children","II_Edge", "II","Mean_I_Edge","Mean_I","Median_I"), quietly = TRUE)
+ggplot(Cells_int, aes(x = Sample,y = value),quietly = TRUE) + facet_wrap(~variable, scale="free") + geom_violin(aes(fill = variable), size = 1)+ labs( y = "value", x = NULL) + theme(axis.text.x = element_text(angle=30, hjust=1, vjust=1)) 
+
+outlierreplacement <- function(dataframe){
+   dataframe %>%          
+           map_if(is.numeric, ~ replace(.x, .x %in% boxplot.stats(.x)$out, NA)) %>%
+           bind_cols }
+
+outlierreplacement(Cells_cl[,2:17])
+
+Cells_cl <- Cells_cl[complete.cases(Cells_cl),]
+data.frame(Cells_cl)
+rm(Cells,Cells_int)
+```
+Построим графики частот распределения 4-х основных характеристик наших клеток (количество дочерних объектов на клетку - Children, интегральная интенсивность - II, интегральная интенсивность периметра каждого объекта - II_Edge, и медианная интенсивность клетки - Median_I) и выведем статистику по группам. На графиках шкала y предствавляет собой log10 от частоты. 
+
+```{r}
+Cells_param_ch <- aggregate(Children ~ Sample, data = Cells_cl, function(x) c (mean = mean(x),median = median(x),sd = sd(x),first_quant = quantile(x,0.25), third_quant = quantile(x,0.75), min = min(x), max = max(x))) 
+Cells_param_InIn <-  aggregate(II ~ Sample, data = Cells_cl, function(x) c (mean = mean(x),median = median(x),sd = sd(x),first_quant = quantile(x,0.25), third_quant = quantile(x,0.75), min = min(x), max = max(x)))
+Cells_param_InIn_E <-  aggregate(II_Edge ~ Sample, data = Cells_cl, function(x) c (mean = mean(x),median = median(x),sd = sd(x),first_quant = quantile(x,0.25), third_quant = quantile(x,0.75), min = min(x), max = max(x)))
+Cells_param_InIn_m <-  aggregate(Median_I ~ Sample, data = Cells_cl, function(x) c (mean = mean(x),median = median(x),sd = sd(x),first_quant = quantile(x,0.25), third_quant = quantile(x,0.75), min = min(x), max = max(x)))
+Param_ch <- cbind(Cells_param_ch[-ncol(Cells_param_ch)], Cells_param_ch[[ncol(Cells_param_ch)]])
+
+print(Param_ch)
+ggplot(Cells_cl, aes(x = Children, col = Sample))+geom_freqpoly(binwidth = 2)+xlim(0,150)+scale_y_continuous(trans='log10')+labs(x = 'Children', y = 'log10count')
+
+Param_InIn <- cbind(Cells_param_InIn[-ncol(Cells_param_InIn)], Cells_param_InIn[[ncol(Cells_param_InIn)]])
+print(Param_InIn)
+ggplot(Cells_cl, aes(x = II, col = Sample))+geom_freqpoly(binwidth = 10)+xlim(0,1000)+scale_y_continuous(trans='log10')+labs(x = 'II', y = 'log10count')
+
+Param_InInE <- cbind(Cells_param_InIn_E[-ncol(Cells_param_InIn_E)], Cells_param_InIn_E[[ncol(Cells_param_InIn_E)]])
+print(Param_InInE)
+ggplot(Cells_cl, aes(x = II_Edge, col = Sample))+geom_freqpoly(binwidth = 0.5)+scale_y_continuous(trans='log10')+labs(x = 'II_Edge', y = 'log10count')
+
+Param_InIn_m <- cbind(Cells_param_InIn_m[-ncol(Cells_param_InIn_m)], Cells_param_InIn_m[[ncol(Cells_param_InIn_m)]])
+print(Param_InIn_m)
+ggplot(Cells_cl, aes(x = Median_I, col = Sample))+geom_freqpoly(binwidth = 0.02)+scale_y_continuous(trans='log10')+labs(x = 'Median_I', y = 'log10count')
+
+rm (Cells_param_ch, Cells_param_InIn, Cells_param_InIn_E, Cells_param_InIn_m, Param_ch, Param_InIn, Param_InIn_m, Param_InInE)
+
+
+
+```
+Отфильтруем короткие объекты в датасете Strings, оставим только те, чей Максимальныей диаметр Ферета больше 20 пикселей (размер пикселя - 0,64х0,64 мкм). Расчитаем остновыне статистические показатели для 3-х параметров, а именно:
+-MaxFeretDiameter 
+-Median_I
+-Eccentricity
+```{r}
+String <- Strings %>% filter (MaxFeretDiameter >= 20)
+
+String_param_med <- aggregate(Median_I ~ Sample, data = String, function(x) c (mean = mean(x),median = median(x),sd = sd(x),first_quant = quantile(x,0.25), third_quant = quantile(x,0.75), min = min(x), max = max(x))) 
+String_param_MFD <-  aggregate(MaxFeretDiameter ~ Sample, data = String, function(x) c (mean = mean(x),median = median(x),sd = sd(x),first_quant = quantile(x,0.25), third_quant = quantile(x,0.75),min = min(x), max = max(x)))
+String_param_Ecc <-  aggregate(Eccentricity ~ Sample, data = String, function(x) c (mean = mean(x),median = median(x),sd = sd(x),first_quant = quantile(x,0.25), third_quant = quantile(x,0.75),min = min(x), max = max(x)))
+
+
+Param_String_m <- cbind(String_param_med [-ncol(String_param_med )], String_param_med [[ncol(String_param_med )]])
+print(Param_String_m)
+ggplot(String, aes(x = Median_I, col = Sample))+geom_freqpoly(binwidth = 0.02)+xlim(0,1)+scale_y_continuous(trans='log10')+labs(x = 'Median_I', y = 'log10count')
+
+Param_MFD <- cbind(String_param_MFD [-ncol(String_param_MFD )], String_param_MFD [[ncol(String_param_MFD )]])
+print(Param_MFD)
+ggplot(String, aes(x = MaxFeretDiameter, col = Sample))+geom_freqpoly(binwidth = 5)+xlim(20,300)+scale_y_continuous(trans='log10')+labs(x = 'MaxFeretDiameter', y = 'log10count')
+
+Param_Ecc <- cbind(String_param_Ecc [-ncol(String_param_Ecc )], String_param_Ecc [[ncol(String_param_Ecc)]])
+print(Param_Ecc)
+ggplot(String, aes(x = Eccentricity, col = Sample))+geom_freqpoly(binwidth = 0.1)+xlim(0,1)+scale_y_continuous(trans='log10')+labs(x = 'Eccentricity', y = 'log10count')
+
+rm(String_param_Ecc, String_param_med,String_param_MFD, Param_Ecc, Param_String_m, Param_Ecc, Param_MFD, Strings)
+#String %>% group_by(Sample) %>% select(Sample) %>% count
+
+```
+Удалим выбросы из датасета All_str, отфильтруем данные, чей FormFactor = Inf. Проведем оценку 3 параметров:
+-Eccentricity
+-Median_I
+-
+
+```{r}
+
+outlierreplacement(All_str[,2:21])
+All_str<- All_str[complete.cases(All_str),]
+All_str <- All_str %>% filter(FormFactor <52)
+
+Str_param_Ecc <-  aggregate(Eccentricity ~ Sample, data = All_str, function(x) c (mean = mean(x),median = median(x),sd = sd(x),first_quant = quantile(x,0.25), third_quant = quantile(x,0.75),min = min(x), max = max(x)))
+Param_str_Ecc <- cbind(Str_param_Ecc [-ncol(Str_param_Ecc)], Str_param_Ecc[[ncol(Str_param_Ecc)]])
+print(Param_str_Ecc )
+ggplot(All_str, aes(x = Eccentricity, col = Sample))+geom_freqpoly(binwidth = 0.01)+xlim(0,1)+scale_y_continuous(trans='log10')+labs(x = 'Eccentricity', y = 'log10count')
+
+All_param_med <- aggregate(Median_I ~ Sample, data = All_str, function(x) c (mean = mean(x),median = median(x),sd = sd(x),first_quant = quantile(x,0.25), third_quant = quantile(x,0.75), min = min(x), max = max(x))) 
+Param_Str_m <- cbind(All_param_med[-ncol( All_param_med)], All_param_med [[ncol(All_param_med)]])
+print(Param_Str_m )
+ggplot(All_str, aes(x = Median_I, col = Sample))+geom_freqpoly(binwidth = 0.02)+xlim(0,1)+scale_y_continuous(trans='log10')+labs(x = 'Median_I', y = 'log10count')
+
+
+All_param_MDF <- aggregate(MaxFeretDiameter ~ Sample, data = All_str, function(x) c (mean = mean(x),median = median(x),sd = sd(x),first_quant = quantile(x,0.25), third_quant = quantile(x,0.75), min = min(x), max = max(x))) 
+Param_Str_MDF <- cbind(All_param_MDF[-ncol( All_param_MDF)], All_param_MDF[[ncol(All_param_MDF)]])
+print(Param_Str_MDF)
+ggplot(All_str, aes(x = MaxFeretDiameter, col = Sample))+geom_freqpoly(binwidth = 5)+xlim(0,200)+scale_y_continuous(trans='log10')+labs(x = 'MaxFeretDiameter', y = 'log10count')
+rm(String_param_Ecc, All_param_MDF, All_param_med, Param_Str_m, Param_Str_MDF, Param_str_Ecc, Str_param_Ecc)
+
+```
+Корреляции переменных по всем трем датасетам 
+
+```{r}
+corrplot(cor(Cells_cl[,2:17]), title = "Cells")
+corrplot(cor(String[, 2:22]), title =  "Strings")
+corrplot(cor(All_str[,3:21]), title = "All structures")
+
+
+```
+
+Оценка различий с помощью непараметрической One-way Anova с использованием теста Крускела-Уолиса с пост-хок тестом Данна. Для оценки величины эффекта используется показатель эпсилон-квадрат
+
+```{r}
+kruskal.test(Children ~ Sample, Cells_cl )
+DunnTest(Cells_cl$Children, Cells_cl$Sample, method = "bonferroni")
+epsilonSquared(x = Cells_cl$Children, g= Cells_cl$Sample)
+
+kruskal.test(II ~ Sample, Cells_cl )
+DunnTest(Cells_cl$II, Cells_cl$Sample, method = "bonferroni")
+epsilonSquared(x = Cells_cl$II, g= Cells_cl$Sample)
+
+kruskal.test(II_Edge ~ Sample, Cells_cl )
+DunnTest(Cells_cl$II_Edge, Cells_cl$Sample, method = "bonferroni")
+epsilonSquared(x = Cells_cl$II_Edge, g= Cells_cl$Sample)
+
+```
+
+Расчет выборки и различий для Strings
+
+```{r}
+kruskal.test(MaxFeretDiameter ~ Sample, String )
+DunnTest(String$MaxFeretDiameter, String$Sample, method = "bonferroni")
+epsilonSquared(String$MaxFeretDiameter, String$Sample)
+
+kruskal.test(Eccentricity ~ Sample, String )
+DunnTest(String$Eccentricity, String$Sample, method = "bonferroni")
+epsilonSquared(String$Eccentricity, String$Sample)
+
+kruskal.test(Median_I ~ Sample, String )
+DunnTest(String$Median_I, String$Sample, method = "bonferroni")
+epsilonSquared(String$Median_I, String$Sample)
+```
+```{r}
+kruskal.test(Eccentricity ~ Sample, All_str )
+DunnTest(All_str$Eccentricity, All_str$Sample, method = "bonferroni")
+epsilonSquared(All_str$Eccentricity, All_str$Sample)
+
+
+kruskal.test(Median_I ~ Sample, All_str )
+DunnTest(All_str$Median_I, All_str$Sample, method = "bonferroni")
+epsilonSquared(All_str$Median_I, All_str$Sample)
+
+
+```
+
+
+PCO-анализ. 
+
+```{r}
+sample = sample.split(String, SplitRatio = 0.75)
+train = subset(String, sample = T)
+test = subset(String, sample = F)
+```
+Random 
+
+```{r}
+rf <- randomForest(x = train[,2:22],
+                   y = train$Sample,
+                   ntree = 500,
+                   do.trace = 10)
+rf
+
+train$Sample2 <- ifelse(train$Sample == 'control', "unstimulate", "stimulated")
+train$Sample2 <- factor(train$Sample2)
+
+rf2 <- randomForest(x = train[,2:22],
+                    y = train$Sample2,
+                    ntree = 500,
+                    do.trace = 10,
+                    mtry = 6)
+
+rf2
+
+Str <- subset(train, train$Sample == 'control'| train$Sample == 'Trombin')
+rf3<- randomForest(x = Str[,2:22],
+                   y = Str$Sample2,
+                   ntree = 1000,
+                   do.trace = 20,
+                   mtry = 14) 
+
+rf3
+prediction = predict(rf3, newdata = test[-1])
+cm <-  table(test[,1], prediction)
+cm
+
+```
+
+
+```{r}
+Cells <- subset(Cells_cl, Cells_cl$Sample == 'control' | Cells_cl$Sample == 'Trombin')
+rf_cell<- randomForest(x = Cells[,2:17],y = Cells$Sample, ntree = 1000,do.trace = 100) 
+
+rf_cell
+
+
+
+
+```
+
+
