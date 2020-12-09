@@ -39,7 +39,7 @@ UpperQuartileIntensity (UQ_I): The intensity value of the pixel for which 75% of
 ```{r}
 options(encoding = "UTF-8")
 
-PkgNames <- c("dplyr", "magrittr", "ggplot2", "reshape2", "purrr","utf8", "data.table", "plyr", "rcompanion", "corrplot", "car", "multcomp", "DescTools", "vegan", "randomForest", "caTools")
+PkgNames <- c("dplyr", "magrittr", "ggplot2", "reshape2", "purrr","utf8", "data.table", "plyr", "rcompanion", "corrplot", "car", "multcomp", "DescTools", "vegan", "randomForest", "caTools", "ROCR")
 invisible(suppressMessages(suppressWarnings(lapply(PkgNames, require, character.only = T))))
 ```
 
@@ -260,16 +260,14 @@ rf
 
 train$Sample2 <- ifelse(train$Sample == 'control', "unstimulate", "stimulated")
 train$Sample2 <- factor(train$Sample2)
-
-rf2 <- randomForest(x = train[,2:22],
-                    y = train$Sample2,
-                    ntree = 500,
-                    do.trace = 10,
-                    mtry = 6)
-
-rf2
-
 Str <- subset(train, train$Sample == 'control'| train$Sample == 'Trombin')
+
+mtry <- tuneRF(Str[2:22], Str$Sample2, ntreeTry = 1000, stepFactor = 1.5, improve = 0.1, trace = T, plot = T)
+print(mtry)
+best.m <- mtry[mtry[,2] == min(mtry[,2]), 1]
+print(best.m)
+
+
 rf3<- randomForest(x = Str[,2:22],
                    y = Str$Sample2,
                    ntree = 1000,
@@ -277,22 +275,107 @@ rf3<- randomForest(x = Str[,2:22],
                    mtry = 14) 
 
 rf3
-prediction = predict(rf3, newdata = test[-1])
-cm <-  table(test[,1], prediction)
-cm
+varImpPlot(rf3)
+
+test$Sample2 <- ifelse(test$Sample == 'control', 'unstimulate', 'stimulate')
+test$Sample2 <- factor(test$Sample2)
+
+
+pred1 <- predict(rf3, newdata = test[,2:22], type = "prob")
+perf <- prediction(pred1[,2], test$Sample2)
+auc <- performance(perf, "auc")
+auc
+pred3 <- performance(perf,"tpr", "fpr")
+plot(pred3, main = "ROC Curve for Random Forest", col = 2, lwd = 2)
+abline (a = 0,b = 1, lwd = 2, lty = 2, col = "gray")
+
 
 ```
 
 
 ```{r}
-Cells <- subset(Cells_cl, Cells_cl$Sample == 'control' | Cells_cl$Sample == 'Trombin')
-rf_cell<- randomForest(x = Cells[,2:17],y = Cells$Sample, ntree = 1000,do.trace = 100) 
+Cells_cl$Sample2 <- ifelse(Cells_cl$Sample == 'control', 'unstimulate', 'stimulate')
+Cells_cl$Sample2 <- factor(Cells_cl$Sample2)
+sample = sample.split(Cells_cl, SplitRatio = 0.75)
+train_c = subset(Cells_cl, sample = T)
+test_c = subset(Cells_cl, sample = F)
 
+rf_cell<- randomForest(x = train_c[,2:17],y = train_c$Sample2, ntree = 500,do.trace = 20, mtry = 6) 
 rf_cell
+
+mtry <- tuneRF(train_c[2:17], train_c$Sample2, ntreeTry = 500, stepFactor = 1.5, improve = 0.05, trace = T, plot = T)
+print(mtry)
+best.m <- mtry[mtry[,2] == min(mtry[,2]), 1]
+print(best.m)
+varImpPlot(rf_cell)
+
+pred1 <- predict(rf_cell, newdata = test_c[,2:17], type = "prob")
+perf <- prediction(pred1[,2], test_c$Sample2)
+auc <- performance(perf, "auc")
+auc
+pred3 <- performance(perf,"tpr", "fpr")
+plot(pred3, main = "ROC Curve for Random Forest", col = 2, lwd = 2)
+abline (a = 0,b = 1, lwd = 2, lty = 2, col = "gray")
+```
+
+```{r}
+H2O2_data <- subset(Cells_cl, Cells_cl$Sample == 'H2O2')
+cont_data <- subset(Cells_cl, Cells_cl$Sample == 'control')
+sample.split(cont_data, SplitRatio = 0.5)
+t_cont <- subset(cont_data, sample = T)
+test_c <- subset(cont_data, sample = F)
+H2O2_set <- rbind(H2O2_data, test_c)
+H2O2_set$Sample2 <- ifelse(H2O2_set$Sample == 'control', "unstimulate", 'stimulate')
+H2O2_set$Sample2 <- factor(H2O2_set$Sample2)
+
+
+
+TH_data <- subset(Cells_cl, Cells_cl$Sample == 'Trombin' | Cells_cl$Sample == 'Histamin')
+train_data <- rbind(TH_data, t_cont)
+train_data$Sample2 <- ifelse(train_data$Sample == 'control', "unstimulate", "stimulate")
+train_data$Sample2 <- factor(train_data$Sample2)
+
+
+mtry <- tuneRF(train_data[2:17], train_data$Sample2, ntreeTry = 500, stepFactor = 2, improve = 0.01, trace = T, plot = T)
+print(mtry)
+best.m <- mtry[mtry[,2] == min(mtry[,2]), 1]
+print(best.m)
+
+
+
+
+rf_cell<- randomForest(x = train_data[,2:17],y = train_data$Sample2, ntree = 500,do.trace = 20, mtry = best.m) 
+rf_cell
+plot(rf_cell)
+varImpPlot(rf_cell)
+
+pred1 <- predict(rf_cell, newdata = H2O2_set[,2:17], type = "prob")
+perf <- prediction(pred1[,2], H2O2_set$Sample2)
+auc <- performance(perf, "auc")
+auc
+pred2 <- performance(perf,"tpr", "fpr")
+plot(pred2, main = "ROC Curve for Random Forest", col = 2, lwd = 2)
+abline (a = 0,b = 1, lwd = 2, lty = 2, col = "gray")
 
 
 
 
 ```
+```{r}
+pred3 <- predict(rf_cell, newdata = H2O2_set[,2:17], type = "response")
+result <- c()
+for (i in 1:8169){
+  if(H2O2_set$Sample2[i] == pred3[i]){
+    append(result, 1)
+  }
+  else{
+    append(result,0)
+  }
+}
+ table(result)
 
+ rf_accuracy <- sum(result)/length(result) * 100
+
+
+```
 
