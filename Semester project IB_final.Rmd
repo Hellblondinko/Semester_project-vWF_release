@@ -1,0 +1,312 @@
+---
+title: "Untitled"
+author: "Alexandra Tsitrina"
+date: "12/3/2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning=FALSE, message=FALSE, tidy = TRUE )
+knitr::opts_knit$set(root.dir = '/Volumes/STORAGE/Bioinf/Project Statistics/Project_VWF/Results2')
+```
+
+## Statistical estimation of vWF release in HUVECs##
+
+###Dataset description###
+
+Variables description:
+Sample: experimental group name
+Children:  number of children object per one parental object
+Area: The number of pixels enclosed by object.
+Eccentricity: The eccentricity of the ellipse that has the same second-moments as the region. The eccentricity is the ratio of the distance between the foci of the ellipse and its major axis length. The value is between 0 and 1. (0 and 1 are degenerate cases; an ellipse whose eccentricity is 0 is actually a circle, while an ellipse whose eccentricity is 1 is a line segment.)
+FormFactor: Calculated as 4*π*Area/Perimeter2. Equals 1 for a perfectly circular object.
+MinFeretDiameter, MaxFeretDiameter: The Feret diameter is the distance between two parallel lines tangent on either side of the object (imagine taking a caliper and measuring the object at various angles). The minimum and maximum Feret diameters are the smallest and largest possible diameters, rotating the calipers along all possible angles.
+EquivalentDiameter: The diameter of a circle with the same area as the object.
+IntegratedIntensity (II): The sum of the pixel intensities within an object.
+MeanIntensity (Mean_I): The average pixel intensity within an object.
+StdIntensity (Std_I): The standard deviation of the pixel intensities within an object.
+MaxIntensity (Max_I): The maximal pixel intensity within an object.
+MinIntensity (Min_I): The minimal pixel intensity within an object.
+IntegratedIntensityEdge (Edge_II): The sum of the border pixel intensities of an object.
+MeanIntensityEdge (Mean_I_Edge): The average border pixel intensity of an object.
+StdIntensityEdge (Std_I_Edge): The standard deviation of the border pixel intensities of an object.
+MaxIntensityEdge (Max_I_Edge): The maximal border pixel intensity of an object.
+MinIntensityEdge (Min_I_Edge): The minimal eborder pixel intensity of an object.
+MassDisplacement (MassDisp): The distance between the centers of gravity in the gray-level representation of the object and the binary representation of the object.
+LowerQuartileIntensity (LQ_I): The intensity value of the pixel for which 25% of the pixels in the object have lower values.
+MedianIntensity (Median_I): The median intensity value within the object.
+MADIntensity (Mad_I): The median absolute deviation (MAD) value of the intensities within the object. The MAD is defined as the median(|xi - median(x)|).
+UpperQuartileIntensity (UQ_I): The intensity value of the pixel for which 75% of the pixels in the object have lower values.
+
+```{r}
+options(encoding = "UTF-8")
+
+PkgNames <- c("dplyr", "magrittr", "ggplot2", "reshape2", "purrr","utf8", "data.table", "plyr", "rcompanion", "corrplot", "car", "multcomp", "DescTools", "vegan", "randomForest", "caTools", "ROCR", "rattle", "rpart")
+new.packages <- PkgNames[!(PkgNames %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+invisible(suppressMessages(suppressWarnings(lapply(PkgNames, require, character.only = T))))
+```
+
+## Data geneartion
+On this step we will read our datasets and clean up some variables.
+1. Cells dataset describe intensity parameters of cells, number of vWF-positive structures per single cell (Children) and experimental group  (control, H2O2, Histamin, Trombin) 
+2. Strings dataset describe vWF-positive strings. 
+
+In this chank we delete repeated variables and change group's name for more efficient work.
+
+
+```{r, echo=FALSE}
+abs_way <- getwd()
+abs_way <- normalizePath(abs_way)
+data_files<- dir(abs_way, pattern =".csv")
+
+Cells <- read.table(data_files[2], header = T, sep=",", stringsAsFactors=TRUE )
+Strings <- read.table(data_files[3], header = T, sep=",", stringsAsFactors=TRUE )
+
+Cells <- subset(Cells, select = -c(1:4,6,7:9))
+Strings<- subset(Strings, select = c(5,10,40,42,48,65,73,111:125))
+
+
+Cells$Metadata_Sample <-  revalue(Cells$Metadata_Sample, c('control' = 'control', 'H2O2_Ti' = 'H2O2','Thr_Til' = 'Trombin', 'Hist_Ti' = 'Histamin'))
+Strings$Metadata_Sample <-  revalue(Strings$Metadata_Sample, c("control"="control", "H2O2_Ti"="H2O2","Thr_Til" = "Trombin", "Hist_Ti" = "Histamin"))
+
+setnames(Strings, old = c("Metadata_Sample","AreaShape_Area","AreaShape_Eccentricity","AreaShape_EquivalentDiameter","AreaShape_FormFactor","AreaShape_MaxFeretDiameter","AreaShape_MinFeretDiameter","Intensity_IntegratedIntensityEdge_vWF","Intensity_IntegratedIntensity_vWF","Intensity_LowerQuartileIntensity_vWF","Intensity_MADIntensity_vWF","Intensity_MassDisplacement_vWF","Intensity_MaxIntensityEdge_vWF","Intensity_MaxIntensity_vWF","Intensity_MeanIntensityEdge_vWF","Intensity_MeanIntensity_vWF","Intensity_MedianIntensity_vWF","Intensity_MinIntensityEdge_vWF","Intensity_MinIntensity_vWF","Intensity_StdIntensityEdge_vWF","Intensity_StdIntensity_vWF","Intensity_UpperQuartileIntensity_vWF"), new = c("Sample","Area","Eccentricity",  "EquivalentDiameter","FormFactor","MaxFeretDiameter","MinFeretDiameter","II_Edge","II","LQ_I","MAD_I","MassDisp","Max_I_Edge","Max_I","Mean_I_Edge","Mean_I","Median_I","Min_I_Edge","Min_I","Std_I_Edge","Std_I","UQ_I"))
+
+
+setnames(Cells, old = c("Metadata_Sample", "Children_All_vWF_Count","Intensity_IntegratedIntensityEdge_vWF", "Intensity_IntegratedIntensity_vWF","Intensity_LowerQuartileIntensity_vWF","Intensity_MADIntensity_vWF","Intensity_MassDisplacement_vWF","Intensity_MaxIntensityEdge_vWF","Intensity_MaxIntensity_vWF","Intensity_MeanIntensityEdge_vWF","Intensity_MeanIntensity_vWF","Intensity_MedianIntensity_vWF","Intensity_MinIntensityEdge_vWF","Intensity_MinIntensity_vWF","Intensity_StdIntensityEdge_vWF", "Intensity_StdIntensity_vWF","Intensity_UpperQuartileIntensity_vWF"), new = c("Sample", "Children","II_Edge", "II","LQ_I","MAD_I","MassDisp","Max_I_Edge","Max_I","Mean_I_Edge","Mean_I","Median_I","Min_I_Edge","Min_I","Std_I_Edge", "Std_I","UQ_I"))
+
+  
+```
+
+Filtration of cells with umappropriate phenotype (Number of Children object less than 4). Estimation of Intensity parameters distribution using violin plot. As we can see, the distribution of aur variables are non normal.
+
+```{r, include=FALSE}
+Cells_cl <- Cells %>% filter(Children > 4) 
+
+Cells_int = reshape2::melt(Cells_cl, id.vars = "Sample", measure.vars = c("Children","II_Edge","II","LQ_I","MAD_I","MassDisp","Max_I_Edge","Max_I","Mean_I_Edge","Mean_I","Median_I","Min_I_Edge","Min_I","Std_I_Edge", "Std_I","UQ_I" ), quietly = TRUE)
+ggplot(Cells_int, aes(x = Sample,y = value),quietly = TRUE) + facet_wrap(~variable, scale="free") + geom_violin(aes(fill = variable), size = 1)+ labs( y = "value", x = NULL) + theme(axis.text.x = element_text(angle=30, hjust=1, vjust=1)) 
+```
+Outliers removing and generation of clean dataset
+```{r include= FALSE}
+outlierreplacement <- function(dataframe){
+   dataframe %>%          
+           map_if(is.numeric, ~ replace(.x, .x %in% boxplot.stats(.x)$out, NA)) %>%
+           bind_cols }
+
+outlierreplacement(Cells_cl[,2:17])
+
+Cells_cl <- Cells_cl[complete.cases(Cells_cl),]
+data.frame(Cells_cl)
+rm(Cells,Cells_int)
+```
+Estimation of frequency distribution of 4 variables from our dataset Cells. Analysed vars: Children - number of vWF-positive structures per cell, II - integrated intensity of vWF signal, II_Edge - integral intensity of cell perimeter, Median_I - median intensity of vWF signal.  Here we generate frequency plots of these vars and calculate descriptive statistics for each var (mean, median, sd, first quantile, third quantile, min and max)  
+
+```{r}
+Cells_param_ch <- aggregate(Children ~ Sample, data = Cells_cl, function(x) c (mean = mean(x),median = median(x),sd = sd(x),first_quant = quantile(x,0.25), third_quant = quantile(x,0.75), min = min(x), max = max(x))) 
+Cells_param_InIn <-  aggregate(II ~ Sample, data = Cells_cl, function(x) c (mean = mean(x),median = median(x),sd = sd(x),first_quant = quantile(x,0.25), third_quant = quantile(x,0.75), min = min(x), max = max(x)))
+Cells_param_InIn_E <-  aggregate(II_Edge ~ Sample, data = Cells_cl, function(x) c (mean = mean(x),median = median(x),sd = sd(x),first_quant = quantile(x,0.25), third_quant = quantile(x,0.75), min = min(x), max = max(x)))
+Cells_param_InIn_m <-  aggregate(Median_I ~ Sample, data = Cells_cl, function(x) c (mean = mean(x),median = median(x),sd = sd(x),first_quant = quantile(x,0.25), third_quant = quantile(x,0.75), min = min(x), max = max(x)))
+Param_ch <- cbind(Cells_param_ch[-ncol(Cells_param_ch)], Cells_param_ch[[ncol(Cells_param_ch)]])
+
+print(Param_ch)
+ggplot(Cells_cl, aes(x = Children, col = Sample))+geom_freqpoly(binwidth = 2)+xlim(0,150)+scale_y_continuous(trans='log10')+labs(x = 'Children', y = 'log10count')
+
+Param_InIn <- cbind(Cells_param_InIn[-ncol(Cells_param_InIn)], Cells_param_InIn[[ncol(Cells_param_InIn)]])
+print(Param_InIn)
+ggplot(Cells_cl, aes(x = II, col = Sample))+geom_freqpoly(binwidth = 10)+xlim(0,1000)+scale_y_continuous(trans='log10')+labs(x = 'II', y = 'log10count')
+
+Param_InInE <- cbind(Cells_param_InIn_E[-ncol(Cells_param_InIn_E)], Cells_param_InIn_E[[ncol(Cells_param_InIn_E)]])
+print(Param_InInE)
+ggplot(Cells_cl, aes(x = II_Edge, col = Sample))+geom_freqpoly(binwidth = 0.5)+scale_y_continuous(trans='log10')+labs(x = 'II_Edge', y = 'log10count')
+
+Param_InIn_m <- cbind(Cells_param_InIn_m[-ncol(Cells_param_InIn_m)], Cells_param_InIn_m[[ncol(Cells_param_InIn_m)]])
+print(Param_InIn_m)
+ggplot(Cells_cl, aes(x = Median_I, col = Sample))+geom_freqpoly(binwidth = 0.02)+scale_y_continuous(trans='log10')+labs(x = 'Median_I', y = 'log10count')
+
+rm (Cells_param_ch, Cells_param_InIn, Cells_param_InIn_E, Cells_param_InIn_m, Param_ch, Param_InIn, Param_InIn_m, Param_InInE)
+
+
+
+```
+Filtration of short objects in dataset String (MaxFeretDiameter is less than 20 pixels, pixelsize - 0.64x0.64 um). Estimation of frequency distribution and descriptive statistic generation for 3 vars:
+-MaxFeretDiameter 
+-Median_I
+-Eccentricity
+```{r}
+String <- Strings %>% filter (MaxFeretDiameter >= 20)
+
+String_param_med <- aggregate(Median_I ~ Sample, data = String, function(x) c (mean = mean(x),median = median(x),sd = sd(x),first_quant = quantile(x,0.25), third_quant = quantile(x,0.75), min = min(x), max = max(x))) 
+String_param_MFD <-  aggregate(MaxFeretDiameter ~ Sample, data = String, function(x) c (mean = mean(x),median = median(x),sd = sd(x),first_quant = quantile(x,0.25), third_quant = quantile(x,0.75),min = min(x), max = max(x)))
+String_param_Ecc <-  aggregate(Eccentricity ~ Sample, data = String, function(x) c (mean = mean(x),median = median(x),sd = sd(x),first_quant = quantile(x,0.25), third_quant = quantile(x,0.75),min = min(x), max = max(x)))
+
+
+Param_String_m <- cbind(String_param_med [-ncol(String_param_med )], String_param_med [[ncol(String_param_med )]])
+print(Param_String_m)
+ggplot(String, aes(x = Median_I, col = Sample))+geom_freqpoly(binwidth = 0.02)+xlim(0,1)+scale_y_continuous(trans='log10')+labs(x = 'Median_I', y = 'log10count')
+
+Param_MFD <- cbind(String_param_MFD [-ncol(String_param_MFD )], String_param_MFD [[ncol(String_param_MFD )]])
+print(Param_MFD)
+ggplot(String, aes(x = MaxFeretDiameter, col = Sample))+geom_freqpoly(binwidth = 5)+xlim(20,300)+scale_y_continuous(trans='log10')+labs(x = 'MaxFeretDiameter', y = 'log10count')
+
+Param_Ecc <- cbind(String_param_Ecc [-ncol(String_param_Ecc )], String_param_Ecc [[ncol(String_param_Ecc)]])
+print(Param_Ecc)
+ggplot(String, aes(x = Eccentricity, col = Sample))+geom_freqpoly(binwidth = 0.1)+xlim(0,1)+scale_y_continuous(trans='log10')+labs(x = 'Eccentricity', y = 'log10count')
+
+rm(String_param_Ecc, String_param_med,String_param_MFD, Param_Ecc, Param_String_m, Param_Ecc, Param_MFD, Strings)
+
+
+```
+Estimation of correlation between variables in both datasets.
+
+```{r}
+corrplot(cor(Cells_cl[,2:17]), title = "Cells")
+corrplot(cor(String[, 2:22]), title =  "Strings")
+
+
+```
+Estimation of statistical difference between groups by Kruscal-Walis test with Dunn post-hoc test for Children, II and Edge_II vars in Cells dataset. Epsilon squared criterion was used for estimation of effect size. 
+```{r}
+kruskal.test(Children ~ Sample, Cells_cl )
+DunnTest(Cells_cl$Children, Cells_cl$Sample, method = "bonferroni")
+epsilonSquared(x = Cells_cl$Children, g= Cells_cl$Sample)
+
+kruskal.test(II ~ Sample, Cells_cl )
+DunnTest(Cells_cl$II, Cells_cl$Sample, method = "bonferroni")
+epsilonSquared(x = Cells_cl$II, g= Cells_cl$Sample)
+
+kruskal.test(II_Edge ~ Sample, Cells_cl )
+DunnTest(Cells_cl$II_Edge, Cells_cl$Sample, method = "bonferroni")
+epsilonSquared(x = Cells_cl$II_Edge, g= Cells_cl$Sample)
+
+
+```
+
+Estimation of statistical difference between groups by Kruscal-Walis test with Dunn post-hoc test for MaxFeretDiameter, Eccentricity and Median_I vars in Strings dataset. Epsilon squared criterion was used for estimation of effect size. 
+
+```{r}
+kruskal.test(MaxFeretDiameter ~ Sample, String )
+DunnTest(String$MaxFeretDiameter, String$Sample, method = "bonferroni")
+epsilonSquared(String$MaxFeretDiameter, String$Sample)
+
+kruskal.test(Eccentricity ~ Sample, String )
+DunnTest(String$Eccentricity, String$Sample, method = "bonferroni")
+epsilonSquared(String$Eccentricity, String$Sample)
+
+kruskal.test(Median_I ~ Sample, String )
+DunnTest(String$Median_I, String$Sample, method = "bonferroni")
+epsilonSquared(String$Median_I, String$Sample)
+
+```
+
+###Random Forest classsification
+Lets add one new factor variable, descibing cell status (stimulate, unstimulate) in Cells dataset. In stimulate we add all observation from H2O2, Histamine and Trombine groups, in unstimulate - control cells. Next, we split our datsset for 3 parts: training, test and validation datasets in ratio 0.25:0.25:0.5. For random forest generation we used manually determined mtry metric = 6 (the number of vars which will taken by algorithm in each iteration), total number of trees was 500. Out of bagging rate = 15.11%   VarImpPlot was used for estimation of variables importance for classification. Test dataset was used for prediction of cell type (stimulate/unstimulate), ROC-curve plotting and AUC calculation.
+
+```{r}
+Cells_cl$Sample2 <- ifelse(Cells_cl$Sample == 'control', 'unstimulate', 'stimulate')
+Cells_cl$Sample2 <- factor(Cells_cl$Sample2)
+
+set.seed(7)
+ss <- sample(1:3, size=nrow(Cells_cl), replace = TRUE, prob = c(0.5,0.25,0.25))
+valid_c <- Cells_cl[ss==1,]
+test_c <- Cells_cl[ss==2,]
+train_c <- Cells_cl[ss==3,]
+
+rf_cell<- randomForest(x = train_c[,2:17],y = train_c$Sample2, ntree = 500,do.trace = 20, mtry = 6)
+rf_cell
+
+varImpPlot(rf_cell)
+
+pred1 <- predict(rf_cell, test_c[,2:17], type = "prob")
+perf <- prediction(pred1[,2], test_c$Sample2)
+auc <- performance(perf, "auc")
+print(auc@y.values)
+pred3 <- performance(perf,"tpr", "fpr")
+plot(pred3, main = "ROC Curve for Random Forest", col = 2, lwd = 2)
+abline (a = 0,b = 1, lwd = 2, lty = 2, col = "gray")
+```
+
+Decision tree for Cells
+```{r fig.height=12, fig.width=12}
+fit <- rpart(Sample2 ~ Children+II_Edge+II+LQ_I+MAD_I+MassDisp+Max_I_Edge+Max_I+Mean_I_Edge+Mean_I+Median_I+Min_I_Edge+Min_I+Std_I_Edge+Std_I+UQ_I,data=test_c,method="class",control=rpart.control(minsplit = 50, cp=0),parms=list(split="gini"))
+
+
+
+fancyRpartPlot(fit, main="Random Forest decision tree for cells", tweak = 2)
+```
+```{r}
+pred2 <- predict(rf_cell, newdata = valid_c[,2:17], type = "prob")
+perf <- prediction(pred2[,2], valid_c$Sample2)
+auc <- performance(perf, "auc")
+auc@y.values
+pred3 <- performance(perf,"tpr", "fpr")
+plot(pred3, main = "ROC Curve for Cells_validation RF", col = 2, lwd = 2)
+abline (a = 0,b = 1, lwd = 2, lty = 2, col = "gray")
+
+```
+
+String dataset splitting for test, training and validation parts in ratio 0.5:0.25:0.25
+```{r}
+String$Sample2 <- ifelse(String$Sample == 'control', "unstimulate", "stimulated")
+String$Sample2 <- factor(String$Sample2)
+
+set.seed(7)
+ss <- sample(1:3, size=nrow(String), replace = TRUE, prob = c(0.5,0.25,0.25))
+valid_Str <- String[ss==1,]
+test <- String[ss==2,]
+train <- String[ss==3,]
+
+
+```
+
+
+Random Forest on String dataset. Mtry metric was determined automaticly by mtry function. 1000 of trees were used for random forest generation, varImpPlot was used for estimation of vars importance for classification.  Test datset was used for estimatiuon of accuracy of classification algorithm
+
+```{r}
+mtry <- tuneRF(train[2:22], train$Sample2, ntreeTry = 1000, stepFactor = 1.5, improve = 0.1, trace = T, plot = T)
+print(mtry)
+best.m <- mtry[mtry[,2] == min(mtry[,2]), 1]
+print(best.m)
+
+
+rf_s<- randomForest(x = train[,2:22],
+                   y = train$Sample2,
+                   ntree = 1000,
+                   do.trace = 20,
+                   mtry = 3) 
+
+rf_s
+varImpPlot(rf_s)
+
+
+pred1 <- predict(rf_s, newdata = test[,2:22], type = "prob")
+perf <- prediction(pred1[,2], test$Sample2)
+auc <- performance(perf, measure ="auc")
+auc@y.values
+pred2 <- performance(perf,"tpr", "fpr")
+plot(pred2, main = "ROC Curve for Random Forest", col = 2, lwd = 2)
+abline (a = 0,b = 1, lwd = 2, lty = 2, col = "gray")
+
+```
+Random Forest validation for Strings
+```{r}
+pred3 <- predict(rf_s, newdata = valid_Str[,2:22], type = "prob")
+perf <- prediction(pred3[,2], valid_Str$Sample2)
+auc <- performance(perf, "auc")
+auc@y.values
+pred4 <- performance(perf,"tpr", "fpr")
+plot(pred4, main = "ROC Curve for Strings Random Forest", col = 2, lwd = 2)
+abline (a = 0,b = 1, lwd = 2, lty = 2, col = "gray")
+
+
+```
+Visialization of decision tree for Strings
+```{r fig.height=12, fig.width=12}
+fit_st <- rpart(Sample2 ~ II_Edge+II+LQ_I+MAD_I+MassDisp+Max_I_Edge+Max_I+Mean_I_Edge+Mean_I+Median_I+Min_I_Edge+Min_I+Std_I_Edge+Std_I+UQ_I,data=valid_Str,method="class",control=rpart.control(minsplit = 50, cp=0),parms=list(split="gini"))
+
+
+
+fancyRpartPlot(fit_st, main="Random Forest decision tree for Strings", tweak = 2)
+
+```
+
+
